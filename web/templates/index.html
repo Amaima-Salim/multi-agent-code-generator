@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Dev Team v2</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+  <style>
+    [x-cloak]{display:none!important}
+    .spin{animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .fade-in{animation:fadeIn .4s ease}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    pre[class*="language-"]{margin:0;border-radius:.5rem;font-size:.78rem}
+    ::-webkit-scrollbar{width:5px;height:5px}
+    ::-webkit-scrollbar-track{background:#1e293b}
+    ::-webkit-scrollbar-thumb{background:#475569;border-radius:3px}
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-mono">
+<div x-data="app()" x-init="init()" x-cloak>
+
+  <!-- ── Header ─────────────────────────────────────────────────────── -->
+  <header class="border-b border-slate-800 bg-slate-900/70 backdrop-blur sticky top-0 z-20">
+    <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-xl">🤖</span>
+        <div>
+          <span class="font-bold text-white">AI Dev Team</span>
+          <span class="ml-2 text-xs text-indigo-400 border border-indigo-500/40 rounded px-1.5 py-0.5">v2</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-4 text-xs text-slate-500">
+        <!-- Stack badges -->
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-violet-400"></span>LangGraph
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>ChromaDB
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Tavily
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>Multi-LLM
+        </span>
+        <!-- Memory stats -->
+        <button @click="loadMemoryStats()" class="text-slate-600 hover:text-slate-300">
+          🧠 <span x-text="memStats ? `${memStats.qa_issues} memories` : 'Memory'"></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- ── Input ──────────────────────────────────────────────────────── -->
+    <section class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+      <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-4">Requirement</h2>
+      <div class="flex gap-3">
+        <textarea
+          x-model="requirement" :disabled="running"
+          @keydown.ctrl.enter="generate()"
+          placeholder="Describe what you want to build… e.g. 'Build a FastAPI todo API with SQLite'"
+          rows="3"
+          class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm
+                 placeholder-slate-500 resize-none focus:outline-none focus:border-indigo-500
+                 disabled:opacity-50 disabled:cursor-not-allowed"
+        ></textarea>
+        <button @click="generate()" :disabled="running || !requirement.trim()"
+          class="px-5 rounded-lg font-semibold text-sm bg-indigo-600 hover:bg-indigo-500 text-white
+                 disabled:opacity-40 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1 min-w-[90px]">
+          <template x-if="!running"><span>🚀 Generate</span></template>
+          <template x-if="running">
+            <span class="flex flex-col items-center gap-1">
+              <span class="spin inline-block">⚙️</span>
+              <span class="text-xs">Running…</span>
+            </span>
+          </template>
+        </button>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-2 items-center">
+        <span class="text-xs text-slate-600">Try:</span>
+        <template x-for="ex in examples" :key="ex">
+          <button @click="requirement=ex" :disabled="running"
+            class="text-xs text-indigo-400 hover:underline disabled:opacity-40" x-text="ex"></button>
+        </template>
+      </div>
+    </section>
+
+    <!-- ── LangGraph pipeline ─────────────────────────────────────────── -->
+    <section x-show="running || projectId" class="bg-slate-900 border border-slate-800 rounded-xl p-6 fade-in">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wider">LangGraph Pipeline</h2>
+        <span x-show="projectId" class="text-xs text-slate-600">id: <span x-text="projectId"></span></span>
+      </div>
+
+      <!-- Node chain -->
+      <div class="flex flex-wrap items-center gap-2">
+        <template x-for="(node, idx) in nodes" :key="node.id">
+          <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-all duration-300"
+              :class="{
+                'border-slate-700 bg-slate-800/40 text-slate-500':                node.status==='pending',
+                'border-violet-500 bg-violet-500/10 text-violet-300 shadow-lg shadow-violet-500/10': node.status==='running',
+                'border-emerald-500 bg-emerald-500/10 text-emerald-300': node.status==='completed',
+                'border-red-500 bg-red-500/10 text-red-400':             node.status==='failed',
+              }">
+              <span x-text="node.emoji"></span>
+              <span class="font-medium" x-text="node.label"></span>
+              <!-- LLM badge -->
+              <span x-show="node.llm" class="ml-1 px-1.5 py-0.5 rounded text-xs"
+                :class="node.llm?.includes('gpt') ? 'bg-emerald-900/50 text-emerald-400' : 'bg-orange-900/50 text-orange-400'"
+                x-text="node.llm?.includes('gpt') ? 'GPT-4o' : 'Claude'">
+              </span>
+              <span x-show="node.status==='running'" class="spin text-sm">🔄</span>
+              <span x-show="node.status==='completed'">✅</span>
+              <span x-show="node.status==='failed'">❌</span>
+            </div>
+            <span x-show="idx < nodes.length-1" class="text-slate-700 text-lg">→</span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Live log -->
+      <div x-show="logs.length>0" class="mt-4 max-h-28 overflow-y-auto space-y-0.5 border-t border-slate-800 pt-3">
+        <template x-for="entry in logs" :key="entry.id">
+          <p class="text-xs flex gap-2 text-slate-400">
+            <span class="text-slate-600 flex-shrink-0" x-text="entry.time"></span>
+            <span x-text="entry.msg"></span>
+          </p>
+        </template>
+      </div>
+    </section>
+
+    <!-- ── Enrichment badges ──────────────────────────────────────────── -->
+    <div x-show="projectData && (projectData.memory_hits?.length || projectData.search_queries?.length)"
+         class="grid grid-cols-1 md:grid-cols-2 gap-4 fade-in">
+
+      <!-- ChromaDB hits -->
+      <div x-show="projectData?.memory_hits?.length > 0"
+           class="bg-slate-900 border border-emerald-800/40 rounded-xl p-4">
+        <h3 class="text-xs text-emerald-400 uppercase tracking-wider mb-3">
+          🧠 ChromaDB Memory Hits (<span x-text="projectData.memory_hits.length"></span>)
+        </h3>
+        <ul class="space-y-1.5">
+          <template x-for="hit in projectData.memory_hits" :key="hit">
+            <li class="text-xs text-slate-300 flex gap-2">
+              <span class="text-emerald-500 flex-shrink-0">↩</span>
+              <span x-text="hit"></span>
+            </li>
+          </template>
+        </ul>
+      </div>
+
+      <!-- Tavily queries -->
+      <div x-show="projectData?.search_queries?.length > 0"
+           class="bg-slate-900 border border-amber-800/40 rounded-xl p-4">
+        <h3 class="text-xs text-amber-400 uppercase tracking-wider mb-3">
+          🔍 Tavily Web Searches (<span x-text="projectData.search_queries.length"></span>)
+        </h3>
+        <ul class="space-y-1.5">
+          <template x-for="q in projectData.search_queries" :key="q">
+            <li class="text-xs text-slate-300 flex gap-2">
+              <span class="text-amber-500 flex-shrink-0">→</span>
+              <span x-text="q"></span>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ── Summary bar ────────────────────────────────────────────────── -->
+    <div x-show="projectData" class="grid grid-cols-2 md:grid-cols-4 gap-4 fade-in">
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs text-slate-500 mb-1">Files</p>
+        <p class="text-2xl font-bold text-white" x-text="projectData?.code?.files?.length ?? 0"></p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs text-slate-500 mb-1">QA Score</p>
+        <p class="text-2xl font-bold"
+           :class="(projectData?.qa_report?.overall_score??0)>=7?'text-emerald-400':'text-amber-400'"
+           x-text="projectData?.qa_report ? projectData.qa_report.overall_score+'/10' : '—'"></p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs text-slate-500 mb-1">Issues</p>
+        <p class="text-2xl font-bold text-amber-400"
+           x-text="projectData?.qa_report?.issues?.length ?? '—'"></p>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+        <p class="text-xs text-slate-500 mb-1">Review</p>
+        <p class="text-xl font-bold"
+           :class="projectData?.review?.approved?'text-emerald-400':'text-red-400'"
+           x-text="projectData?.review ? (projectData.review.approved?'Approved ✅':'Rejected ❌') : '—'"></p>
+      </div>
+    </div>
+
+    <!-- ── Tabs ───────────────────────────────────────────────────────── -->
+    <div x-show="projectData" class="fade-in">
+      <div class="flex gap-1 mb-4 bg-slate-900 border border-slate-800 rounded-xl p-1 w-fit flex-wrap">
+        <template x-for="tab in tabs" :key="tab.id">
+          <button @click="activeTab=tab.id"
+            :class="activeTab===tab.id?'bg-indigo-600 text-white':'text-slate-400 hover:text-slate-200 hover:bg-slate-800'"
+            class="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+            x-text="tab.label"></button>
+        </template>
+      </div>
+
+      <!-- Files tab -->
+      <div x-show="activeTab==='files'" class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 max-h-[72vh] overflow-y-auto">
+          <p class="text-xs text-slate-500 uppercase tracking-wider mb-3">
+            Files (<span x-text="projectData?.code?.files?.length??0"></span>)
+          </p>
+          <div class="space-y-1">
+            <template x-for="(f,i) in projectData?.code?.files??[]" :key="f.filename">
+              <button @click="selFile=i"
+                :class="selFile===i?'bg-indigo-500/20 text-indigo-300 border-indigo-500':'text-slate-400 border-transparent hover:bg-slate-800'"
+                class="w-full text-left px-3 py-2 rounded-lg text-xs border transition-all">
+                <span class="block truncate font-medium" x-text="f.filename"></span>
+                <span class="block truncate text-slate-500 mt-0.5 text-[0.65rem]" x-text="f.description"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+        <div class="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+          <template x-if="projectData?.code?.files?.length>0">
+            <div>
+              <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+                <div>
+                  <span class="text-sm font-semibold text-slate-200"
+                        x-text="projectData.code.files[selFile]?.filename"></span>
+                  <span class="ml-2 text-xs text-slate-500"
+                        x-text="projectData.code.files[selFile]?.language"></span>
+                </div>
+                <button @click="copy(projectData.code.files[selFile]?.content)"
+                  class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded bg-slate-800">Copy</button>
+              </div>
+              <div class="overflow-auto max-h-[65vh] p-4">
+                <pre x-html="hl(projectData.code.files[selFile]?.content??'', projectData.code.files[selFile]?.language??'text')"></pre>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- QA tab -->
+      <div x-show="activeTab==='qa'" class="space-y-4">
+        <template x-if="projectData?.qa_report">
+          <div class="space-y-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+              <div class="flex justify-between items-start mb-2">
+                <h3 class="text-sm font-semibold text-slate-300">Assessment</h3>
+                <span class="text-2xl font-bold"
+                  :class="projectData.qa_report.overall_score>=7?'text-emerald-400':'text-amber-400'"
+                  x-text="projectData.qa_report.overall_score+'/10'"></span>
+              </div>
+              <p class="text-sm text-slate-400" x-text="projectData.qa_report.overall_assessment"></p>
+            </div>
+            <div x-show="projectData.qa_report.strengths?.length"
+                 class="bg-slate-900 border border-emerald-800/30 rounded-xl p-5">
+              <h3 class="text-sm text-emerald-400 mb-3">✅ Strengths</h3>
+              <ul class="space-y-1">
+                <template x-for="s in projectData.qa_report.strengths" :key="s">
+                  <li class="text-sm text-slate-300 flex gap-2"><span class="text-emerald-500">•</span><span x-text="s"></span></li>
+                </template>
+              </ul>
+            </div>
+            <div x-show="projectData.qa_report.issues?.length"
+                 class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+              <h3 class="text-sm text-slate-300 mb-3">Issues (<span x-text="projectData.qa_report.issues.length"></span>)</h3>
+              <div class="space-y-2">
+                <template x-for="issue in projectData.qa_report.issues" :key="issue.description">
+                  <div class="border rounded-lg p-3"
+                    :class="{
+                      'border-red-700/50 bg-red-950/30':    issue.severity==='critical',
+                      'border-amber-700/50 bg-amber-950/30': issue.severity==='major',
+                      'border-slate-700 bg-slate-800/30':   issue.severity==='minor',
+                      'border-slate-700 bg-slate-800/20':   issue.severity==='info',
+                    }">
+                    <div class="flex gap-2 mb-1">
+                      <span class="text-xs font-bold px-2 py-0.5 rounded uppercase"
+                        :class="{
+                          'bg-red-600 text-white':      issue.severity==='critical',
+                          'bg-amber-600 text-white':    issue.severity==='major',
+                          'bg-slate-600 text-white':    issue.severity==='minor',
+                          'bg-slate-700 text-slate-300':issue.severity==='info',
+                        }"
+                        x-text="issue.severity"></span>
+                      <span class="text-xs text-slate-400 font-mono" x-text="issue.file"></span>
+                    </div>
+                    <p class="text-sm text-slate-200" x-text="issue.description"></p>
+                    <p class="text-xs text-slate-400 mt-1"><span class="text-indigo-400">Fix: </span><span x-text="issue.suggestion"></span></p>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <div x-show="projectData.qa_report.test_files?.length"
+                 class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+              <h3 class="text-sm text-slate-300 mb-3">🧪 Tests (<span x-text="projectData.qa_report.test_files.length"></span>)</h3>
+              <div class="space-y-4">
+                <template x-for="tf in projectData.qa_report.test_files" :key="tf.filename">
+                  <div>
+                    <p class="text-xs text-slate-500 font-mono mb-2" x-text="tf.filename"></p>
+                    <div class="overflow-auto max-h-64 rounded-lg">
+                      <pre x-html="hl(tf.content,'python')"></pre>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Review tab -->
+      <div x-show="activeTab==='review'" class="space-y-4">
+        <template x-if="projectData?.review">
+          <div class="space-y-4">
+            <div class="bg-slate-900 border rounded-xl p-5"
+                 :class="projectData.review.approved?'border-emerald-700/50':'border-red-700/50'">
+              <div class="flex items-start justify-between">
+                <div>
+                  <h3 class="font-semibold text-base"
+                      :class="projectData.review.approved?'text-emerald-400':'text-red-400'"
+                      x-text="projectData.review.approved?'✅ Approved':'❌ Changes Requested'"></h3>
+                  <p class="text-sm text-slate-400 mt-1" x-text="projectData.review.summary"></p>
+                </div>
+                <div class="text-right">
+                  <p class="text-xs text-slate-500">Maintainability</p>
+                  <p class="text-2xl font-bold text-indigo-400" x-text="projectData.review.maintainability_score+'/10'"></p>
+                </div>
+              </div>
+            </div>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Security</p>
+                <p class="text-sm text-slate-300" x-text="projectData.review.security_assessment"></p>
+              </div>
+              <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Performance</p>
+                <p class="text-sm text-slate-300" x-text="projectData.review.performance_notes"></p>
+              </div>
+            </div>
+            <div x-show="projectData.review.comments?.length"
+                 class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+              <h3 class="text-sm text-slate-300 mb-3">Comments (<span x-text="projectData.review.comments.length"></span>)</h3>
+              <div class="space-y-2">
+                <template x-for="c in projectData.review.comments" :key="c.comment">
+                  <div class="border border-slate-700 rounded-lg p-3">
+                    <div class="flex gap-2 mb-1">
+                      <span class="text-xs px-2 py-0.5 rounded font-medium border"
+                        :class="{
+                          'bg-red-600/30 text-red-300 border-red-700/50':       c.priority==='high',
+                          'bg-amber-600/30 text-amber-300 border-amber-700/50': c.priority==='medium',
+                          'bg-slate-700/50 text-slate-400 border-slate-600':    c.priority==='low',
+                        }"
+                        x-text="c.priority"></span>
+                      <span class="text-xs text-indigo-400" x-text="c.category"></span>
+                      <span class="text-xs text-slate-500 font-mono" x-text="c.file"></span>
+                    </div>
+                    <p class="text-sm text-slate-200" x-text="c.comment"></p>
+                    <p x-show="c.suggestion" class="text-xs text-slate-400 mt-1">
+                      <span class="text-indigo-400">Suggestion: </span><span x-text="c.suggestion"></span>
+                    </p>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Spec & Arch tab -->
+      <div x-show="activeTab==='spec'" class="space-y-4">
+        <template x-if="projectData?.spec">
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+            <h3 class="text-base font-semibold text-white mb-1" x-text="projectData.spec.title"></h3>
+            <p class="text-sm text-slate-400 mb-4" x-text="projectData.spec.description"></p>
+            <div class="grid md:grid-cols-2 gap-6">
+              <div>
+                <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Features</p>
+                <ul class="space-y-1">
+                  <template x-for="f in projectData.spec.features" :key="f">
+                    <li class="text-sm text-slate-300 flex gap-2"><span class="text-indigo-400">•</span><span x-text="f"></span></li>
+                  </template>
+                </ul>
+              </div>
+              <div>
+                <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Acceptance Criteria</p>
+                <ul class="space-y-1">
+                  <template x-for="a in projectData.spec.acceptance_criteria" :key="a">
+                    <li class="text-sm text-slate-300 flex gap-2"><span class="text-emerald-400">✓</span><span x-text="a"></span></li>
+                  </template>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </template>
+        <template x-if="projectData?.architecture">
+          <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+            <p class="text-sm text-slate-400" x-text="projectData.architecture.overview"></p>
+            <div class="grid md:grid-cols-2 gap-6">
+              <div>
+                <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Tech Stack</p>
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="t in projectData.architecture.tech_stack" :key="t">
+                    <span class="text-xs px-2 py-1 bg-indigo-600/20 text-indigo-300 border border-indigo-600/30 rounded-md" x-text="t"></span>
+                  </template>
+                </div>
+              </div>
+              <div>
+                <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Dependencies</p>
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="d in projectData.architecture.pip_dependencies" :key="d">
+                    <span class="text-xs px-2 py-1 bg-slate-700 text-slate-300 rounded-md font-mono" x-text="d"></span>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Key Decisions</p>
+              <div class="space-y-2">
+                <template x-for="d in projectData.architecture.key_decisions" :key="d.decision">
+                  <div class="border border-slate-700 rounded-lg px-3 py-2">
+                    <p class="text-sm font-medium text-slate-200" x-text="d.decision"></p>
+                    <p class="text-xs text-slate-500 mt-0.5" x-text="d.rationale"></p>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Setup tab -->
+      <div x-show="activeTab==='setup'" class="space-y-4">
+        <template x-if="projectData?.code">
+          <div class="space-y-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+              <h3 class="text-sm font-semibold text-slate-300 mb-4">Setup Steps</h3>
+              <div class="space-y-3">
+                <template x-for="step in projectData.code.setup_steps" :key="step.step">
+                  <div class="flex gap-3">
+                    <span class="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5"
+                          x-text="step.step"></span>
+                    <div>
+                      <p class="text-xs text-slate-400" x-text="step.description"></p>
+                      <code class="text-sm text-emerald-300 font-mono" x-text="step.command"></code>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Run</p>
+                <code class="text-sm text-emerald-300" x-text="projectData.code.run_command"></code>
+              </div>
+              <div x-show="projectData.code.test_command" class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Test</p>
+                <code class="text-sm text-emerald-300" x-text="projectData.code.test_command"></code>
+              </div>
+            </div>
+            <!-- LLM log -->
+            <div x-show="projectData.llm_log?.length" class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <p class="text-xs text-slate-500 uppercase tracking-wider mb-3">LLM Usage per Agent</p>
+              <div class="space-y-1.5">
+                <template x-for="entry in projectData.llm_log" :key="entry">
+                  <div class="flex items-center gap-2 text-xs">
+                    <span class="text-slate-400" x-text="entry.split('→')[0]"></span>
+                    <span class="text-slate-600">→</span>
+                    <span class="px-2 py-0.5 rounded font-mono"
+                      :class="entry.includes('gpt')||entry.includes('openai')
+                        ? 'bg-emerald-900/40 text-emerald-300'
+                        : 'bg-orange-900/40 text-orange-300'"
+                      x-text="entry.split('→')[1]?.trim()"></span>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <div x-show="projectData.output_path" class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+              <p class="text-xs text-slate-500 uppercase tracking-wider mb-2">Output Directory</p>
+              <code class="text-sm text-indigo-300" x-text="projectData.output_path"></code>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div x-show="!running && !projectId" class="text-center py-20">
+      <p class="text-5xl mb-4">🤖</p>
+      <p class="text-slate-500 text-sm">Enter a requirement and click <strong class="text-slate-300">Generate</strong></p>
+      <div class="mt-6 flex justify-center gap-6 text-xs text-slate-600">
+        <span>LangGraph orchestration</span>
+        <span>·</span>
+        <span>ChromaDB memory</span>
+        <span>·</span>
+        <span>Tavily search</span>
+        <span>·</span>
+        <span>Claude + GPT-4o</span>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+function app() {
+  return {
+    requirement: '',
+    running: false,
+    projectId: null,
+    projectData: null,
+    activeTab: 'files',
+    selFile: 0,
+    logs: [],
+    logId: 0,
+    memStats: null,
+
+    examples: [
+      'Build a REST API for a todo app with FastAPI and SQLite',
+      'Create a CLI tool that converts CSV to JSON with filtering',
+      'Build a URL shortener service with FastAPI and click analytics',
+    ],
+
+    nodes: [
+      { id:'pm',        emoji:'📋', label:'PM Agent',       status:'pending', llm:null },
+      { id:'architect', emoji:'🏗️',  label:'Architect',      status:'pending', llm:null },
+      { id:'developer', emoji:'💻', label:'Developer',      status:'pending', llm:null },
+      { id:'qa',        emoji:'🧪', label:'QA Agent',       status:'pending', llm:null },
+      { id:'reviewer',  emoji:'🔍', label:'Reviewer',       status:'pending', llm:null },
+      { id:'save',      emoji:'💾', label:'Save Output',    status:'pending', llm:null },
+    ],
+
+    tabs: [
+      {id:'files',  label:'📁 Files'},
+      {id:'qa',     label:'🧪 QA'},
+      {id:'review', label:'🔍 Review'},
+      {id:'spec',   label:'📋 Spec & Arch'},
+      {id:'setup',  label:'⚙️ Setup & LLMs'},
+    ],
+
+    init() { this.loadMemoryStats(); },
+
+    async loadMemoryStats() {
+      try {
+        const r = await fetch('/api/memory/stats');
+        this.memStats = await r.json();
+      } catch {}
+    },
+
+    async generate() {
+      if (!this.requirement.trim() || this.running) return;
+
+      this.running = true;
+      this.projectId = null;
+      this.projectData = null;
+      this.logs = [];
+      this.nodes.forEach(n => { n.status = 'pending'; n.llm = null; });
+
+      const nodeMap = {
+        'PM Agent': 'pm', 'Architect Agent': 'architect',
+        'Developer Agent': 'developer', 'QA Agent': 'qa',
+        'Reviewer Agent': 'reviewer', 'Save Output': 'save',
+      };
+
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({requirement: this.requirement}),
+        });
+        const {project_id, error} = await res.json();
+        if (error) { this._addLog('Error: '+error); this.running=false; return; }
+        this.projectId = project_id;
+
+        const es = new EventSource(`/api/stream/${project_id}`);
+        es.onmessage = async (e) => {
+          const data = JSON.parse(e.data);
+
+          if (data.type === 'node_start') {
+            const id = this._nodeId(data.node, nodeMap);
+            if (id) this._setNode(id, 'running');
+            this._addLog(`${data.node} started`);
+          }
+
+          if (data.type === 'node_complete') {
+            const id = this._nodeId(data.node, nodeMap);
+            if (id) this._setNode(id, 'completed');
+            this._addLog(`${data.node} ✓ ${data.detail||''}`);
+          }
+
+          if (data.type === 'done') {
+            es.close();
+            this.running = false;
+            if (data.status === 'completed') {
+              await this.loadProject(project_id);
+            }
+          }
+
+          if (data.type === 'error') {
+            es.close();
+            this.running = false;
+            this._addLog('Pipeline error: ' + data.message);
+          }
+
+          if (data.type === 'timeout') {
+            es.close();
+            this.running = false;
+          }
+        };
+        es.onerror = () => { es.close(); this.running = false; };
+
+      } catch(err) {
+        this._addLog('Error: '+err.message);
+        this.running = false;
+      }
+    },
+
+    async loadProject(id) {
+      const r = await fetch(`/api/project/${id}`);
+      this.projectData = await r.json();
+      this.selFile = 0;
+      this.activeTab = 'files';
+
+      // Update LLM badges from llm_log
+      for (const entry of (this.projectData.llm_log || [])) {
+        for (const [keyword, id] of Object.entries({
+          'PM Agent':'pm','Architect Agent':'architect',
+          'Developer Agent':'developer','QA Agent':'qa',
+          'Reviewer Agent':'reviewer',
+        })) {
+          if (entry.includes(keyword)) {
+            const node = this.nodes.find(n=>n.id===id);
+            if (node) node.llm = entry.split('→')[1]?.trim() || '';
+          }
+        }
+      }
+
+      this.loadMemoryStats();
+      setTimeout(()=>Prism.highlightAll(), 200);
+    },
+
+    hl(code, lang) {
+      const map = {python:'python',py:'python',json:'json',
+                   bash:'bash',sh:'bash',yaml:'yaml',yml:'yaml',
+                   markdown:'markup',md:'markup',text:'markup'};
+      const l = map[lang?.toLowerCase()] || 'markup';
+      if (!Prism.languages[l]) return `<code>${this._esc(code)}</code>`;
+      return `<code class="language-${l}">${Prism.highlight(code, Prism.languages[l], l)}</code>`;
+    },
+
+    copy(content) { navigator.clipboard.writeText(content||'').catch(()=>{}); },
+
+    _esc(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); },
+
+    _addLog(msg) {
+      const t = new Date().toLocaleTimeString('en',{hour12:false});
+      this.logs.push({id:this.logId++, time:t, msg});
+      if (this.logs.length > 30) this.logs.shift();
+    },
+
+    _nodeId(label, map) {
+      for (const [k,v] of Object.entries(map)) if (label.includes(k)) return v;
+      return null;
+    },
+
+    _setNode(id, status) {
+      const n = this.nodes.find(x=>x.id===id);
+      if (n) n.status = status;
+    },
+  };
+}
+</script>
+</body>
+</html>
